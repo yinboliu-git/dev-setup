@@ -8,7 +8,7 @@ setlocal enabledelayedexpansion
 
 echo.
 echo   ============================================================
-echo     Dev Environment Setup v1.0.1
+echo     Dev Environment Setup v2.0
 echo     Git Bash ^| Miniconda ^| Node.js ^| Claude Code
 echo   ============================================================
 echo.
