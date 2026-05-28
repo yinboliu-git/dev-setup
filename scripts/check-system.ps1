@@ -1,5 +1,5 @@
-# ============================================================
-#  check-system.ps1 — 系统环境检测
+﻿# ============================================================
+#  check-system.ps1 — System Environment Detection
 # ============================================================
 param([switch]$Json)
 
@@ -28,14 +28,15 @@ $info = [PSCustomObject]@{
 if ($Json) {
     $info | ConvertTo-Json -Depth 2
 } else {
-    Write-Host "操作系统:   $($info.os) (Build $($info.build))"
+    Write-Host "OS:         $($info.os) (Build $($info.build))"
     Write-Host "Windows 11: $($info.isWin11)"
-    Write-Host "管理员:     $($info.isAdmin)"
+    Write-Host "Admin:      $($info.isAdmin)"
     Write-Host "winget:     $($info.hasWinget)"
     Write-Host "Git:        $($info.gitVersion)"
     Write-Host "Conda:      $($info.condaVersion)"
     Write-Host "Node.js:    $($info.nodeVersion)"
     Write-Host "npm:        $($info.npmVersion)"
-    Write-Host "Claude:     $(if ($info.hasClaude) { (claude --version 2>&1).Trim() } else { '未安装' })"
-    Write-Host "可用磁盘:   $($info.diskFree) GB"
+    Write-Host "Claude:     $(if ($info.hasClaude) { (claude --version 2>&1).Trim() } else { 'not installed' })"
+    Write-Host "Disk free:  $($info.diskFree) GB"
 }
+

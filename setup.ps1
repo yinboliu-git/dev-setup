@@ -1,6 +1,6 @@
-# ============================================================
-#  setup.ps1 — 开发环境一键安装主脚本
-#  在 Git Bash (MinGW) 基础上安装全栈 AI 开发环境
+﻿# ============================================================
+#  setup.ps1 — Dev Environment One-Click Setup
+#  Installs on Git Bash base: Miniconda + Node.js + Claude Code
 # ============================================================
 param (
     [switch]$SkipGit,
@@ -13,14 +13,16 @@ param (
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# ---- 全局状态 ----
+# ---- Global state ----
 $Global:InstallLog = @()
 $Global:Config = @{}
 
-# ---- 常量 ----
+# ---- Constants ----
 $MINICONDA_URL = "https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
 $NODE_URL      = "https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi"
 $GIT_URL       = "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe"
+$MARKER        = "# >>> dev-setup auto config >>>"
+$ENDMARKER     = "# <<< dev-setup auto config <<<"
 
 function Write-Step { param($msg) Write-Host "`n==> $msg" -ForegroundColor Cyan; $Global:InstallLog += $msg }
 function Write-OK   { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
@@ -28,20 +30,12 @@ function Write-Warn { param($msg) Write-Host "  [WARN] $msg" -ForegroundColor Ye
 function Write-Err  { param($msg) Write-Host "  [ERR] $msg" -ForegroundColor Red }
 
 # ============================================================
-#  工具检测
+#  Environment Detection
 # ============================================================
 function Test-Command { param($cmd) return (Get-Command $cmd -ErrorAction SilentlyContinue) -ne $null }
 
-function Get-InstalledVersion {
-    param($cmd, $args)
-    try {
-        $output = & $cmd $args 2>&1 | Out-String
-        return $output.Trim()
-    } catch { return $null }
-}
-
 function Detect-Environment {
-    Write-Step "检测当前环境..."
+    Write-Step "Detecting environment..."
 
     $Global:Config.IsWin11       = [Environment]::OSVersion.Version.Build -ge 22000
     $Global:Config.HasWinget     = Test-Command winget.exe
@@ -51,7 +45,6 @@ function Detect-Environment {
     $Global:Config.HasNpm        = Test-Command npm.exe
     $Global:Config.HasClaude     = Test-Command claude.exe
 
-    # Git Bash 路径
     $Global:Config.GitBashPath = ""
     if ($Global:Config.HasGit) {
         $gitPath = (Get-Command git.exe).Source
@@ -60,7 +53,6 @@ function Detect-Environment {
         if (Test-Path $bashPath) { $Global:Config.GitBashPath = $bashPath }
     }
 
-    # Git Bash 的 home 目录
     $Global:Config.GitBashHome = "$env:USERPROFILE"
     $Global:Config.BashrcPath  = Join-Path $Global:Config.GitBashHome ".bashrc"
 
@@ -79,60 +71,61 @@ function Detect-Environment {
         $ver = (claude --version 2>&1).Trim()
         Write-OK "  $ver"
     }
-    Write-OK "Git Bash: $(if ($Global:Config.GitBashPath) { $Global:Config.GitBashPath } else { '未找到' })"
+    Write-OK "Git Bash: $(if ($Global:Config.GitBashPath) { $Global:Config.GitBashPath } else { 'not found' })"
 }
 
 # ============================================================
-#  用户交互式配置收集
+#  Interactive Config Wizard
 # ============================================================
 function Invoke-ConfigWizard {
-    Write-Step "配置向导"
+    Write-Step "Configuration Wizard"
 
-    # --- Git 配置 ---
-    Write-Host "`n  --- Git 配置 ---" -ForegroundColor Yellow
+    # --- Git ---
+    Write-Host "`n  --- Git Config ---" -ForegroundColor Yellow
     if (-not $Global:Config.GitUser) {
-        $Global:Config.GitUser = Read-Host "  Git 用户名"
+        $Global:Config.GitUser = Read-Host "  Git user name"
     }
     if (-not $Global:Config.GitEmail) {
-        $Global:Config.GitEmail = Read-Host "  Git 邮箱"
+        $Global:Config.GitEmail = Read-Host "  Git email"
     }
 
-    # --- 代理 / VPN 配置 ---
-    Write-Host "`n  --- 代理 / VPN 配置 (留空跳过) ---" -ForegroundColor Yellow
+    # --- Proxy / VPN ---
+    Write-Host "`n  --- Proxy / VPN (leave blank to skip) ---" -ForegroundColor Yellow
     if ($null -eq $Global:Config.ProxyHost) {
-        $input = Read-Host "  代理地址 (如 127.0.0.1)"
+        $input = Read-Host "  Proxy host (e.g. 127.0.0.1)"
         $Global:Config.ProxyHost = if ($input) { $input } else { "" }
     }
     if ($null -eq $Global:Config.ProxyPort) {
-        $input = Read-Host "  代理端口 (如 7890)"
+        $input = Read-Host "  Proxy port (e.g. 7890)"
         $Global:Config.ProxyPort = if ($input) { $input } else { "" }
     }
     if ($Global:Config.ProxyHost -and $Global:Config.ProxyPort) {
         $Global:Config.ProxyUrl = "http://$($Global:Config.ProxyHost):$($Global:Config.ProxyPort)"
-        Write-OK "代理地址: $($Global:Config.ProxyUrl)"
+        Write-OK "Proxy: $($Global:Config.ProxyUrl)"
     } else {
         $Global:Config.ProxyUrl = ""
-        Write-OK "不使用代理"
+        Write-OK "No proxy"
     }
 
-    # --- AI 后端配置 ---
-    Write-Host "`n  --- AI 后端配置 ---" -ForegroundColor Yellow
+    # --- AI Backend ---
+    Write-Host "`n  --- AI Backend Config ---" -ForegroundColor Yellow
     $backends = @{
-        "1" = @{ Name="DeepSeek";         Url="https://api.deepseek.com/anthropic"; KeyLabel="DeepSeek API Key" }
-        "2" = @{ Name="OpenAI (兼容)";    Url="https://api.openai.com/v1";           KeyLabel="OpenAI API Key" }
-        "3" = @{ Name="自定义";           Url="";                                    KeyLabel="API Key" }
+        "1" = @{ Name="DeepSeek";             Url="https://api.deepseek.com/anthropic"; KeyLabel="DeepSeek API Key" }
+        "2" = @{ Name="OpenAI Compatible";    Url="https://api.openai.com/v1";           KeyLabel="OpenAI API Key" }
+        "3" = @{ Name="Custom";               Url="";                                    KeyLabel="API Key" }
     }
 
-    Write-Host "  可选后端:"
+    Write-Host "  Available backends:"
     foreach ($k in $backends.Keys | Sort-Object) {
-        Write-Host "    $k. $($backends[$k].Name)  ($($backends[$k].Url))"
+        $urlStr = if ($backends[$k].Url) { " ($($backends[$k].Url))" } else { "" }
+        Write-Host "    $k. $($backends[$k].Name)$urlStr"
     }
-    $choice = Read-Host "  选择后端 (1/2/3, 默认 1)"
+    $choice = Read-Host "  Select backend (1/2/3, default 1)"
     if (-not $choice) { $choice = "1" }
     $selected = $backends[$choice]
 
     if ($choice -eq "3" -and -not $Global:Config.ApiBaseUrl) {
-        $Global:Config.ApiBaseUrl = Read-Host "  输入后端 URL"
+        $Global:Config.ApiBaseUrl = Read-Host "  Enter backend URL"
     } elseif (-not $Global:Config.ApiBaseUrl) {
         $Global:Config.ApiBaseUrl = $selected.Url
     }
@@ -143,196 +136,182 @@ function Invoke-ConfigWizard {
 
     if (-not $Global:Config.ApiModel) {
         $defaultModel = if ($choice -eq "1") { "deepseek-v4-pro" } else { "" }
-        $input = Read-Host "  模型名称 (默认: $defaultModel)"
+        $input = Read-Host "  Model name (default: $defaultModel)"
         $Global:Config.ApiModel = if ($input) { $input } else { $defaultModel }
     }
 
-    # --- Claude Code 版本 ---
+    # --- Claude Code version ---
     if (-not $Global:Config.ClaudeVersion) {
         $Global:Config.ClaudeVersion = $ClaudeVersion
-        $input = Read-Host "`n  Claude Code 版本 (默认: $ClaudeVersion, 输入 skip 跳过安装)"
+        $input = Read-Host "`n  Claude Code version (default: $ClaudeVersion, type 'skip' to skip)"
         if ($input -eq "skip") { $Global:Config.SkipClaude = $true }
         elseif ($input) { $Global:Config.ClaudeVersion = $input }
     }
 
-    Write-OK "配置收集完成"
+    Write-OK "Configuration complete"
 }
 
 # ============================================================
-#  安装函数
+#  Install Functions
 # ============================================================
 function Install-GitForWindows {
     if ($Global:Config.HasGit) {
-        Write-Step "Git 已安装，跳过"
+        Write-Step "Git already installed, skipping"
         return
     }
-    Write-Step "安装 Git for Windows..."
+    Write-Step "Installing Git for Windows..."
 
     if ($Global:Config.HasWinget) {
         winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
-        if ($LASTEXITCODE -eq 0) { Write-OK "Git 安装完成 (winget)"; return }
+        if ($LASTEXITCODE -eq 0) { Write-OK "Git installed (winget)"; return }
     }
 
-    # fallback: 直接下载
     $installer = "$env:TEMP\Git-Installer.exe"
-    Write-OK "下载 Git for Windows..."
+    Write-OK "Downloading Git for Windows..."
     Invoke-WebRequest -Uri $GIT_URL -OutFile $installer
     Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/NORESTART','/NOCANCEL','/SP-','/CLOSEAPPLICATIONS','/RESTARTAPPLICATIONS' -Wait
     Remove-Item $installer -Force
-    Write-OK "Git 安装完成 (direct download)"
+    Write-OK "Git installed (direct download)"
 }
 
 function Install-Miniconda {
     if ($Global:Config.HasConda) {
-        Write-Step "Conda 已安装，跳过"
+        Write-Step "Conda already installed, skipping"
         return
     }
-    Write-Step "安装 Miniconda..."
+    Write-Step "Installing Miniconda..."
 
     $installer = "$env:TEMP\Miniconda3-Installer.exe"
-    Write-OK "下载 Miniconda..."
+    Write-OK "Downloading Miniconda..."
     Invoke-WebRequest -Uri $MINICONDA_URL -OutFile $installer
 
-    # 安装到用户目录下
     $installPath = "$env:USERPROFILE\Miniconda3"
     Start-Process -FilePath $installer -ArgumentList "/S","/InstallationType=JustMe","/RegisterPython=0","/AddToPath=0","/D=$installPath" -Wait
     Remove-Item $installer -Force
 
-    # 添加到 PATH (当前会话)
     $env:Path = "$installPath;$installPath\Scripts;$installPath\Library\bin;$env:Path"
-    Write-OK "Miniconda 安装完成: $installPath"
+    Write-OK "Miniconda installed: $installPath"
 }
 
 function Install-NodeJS {
     if ($Global:Config.HasNode -and $Global:Config.HasNpm) {
-        Write-Step "Node.js 已安装，跳过"
+        Write-Step "Node.js already installed, skipping"
         return
     }
-    Write-Step "安装 Node.js..."
+    Write-Step "Installing Node.js..."
 
     if ($Global:Config.HasWinget) {
         winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-source-agreements --accept-package-agreements
         if ($LASTEXITCODE -eq 0) {
-            # 刷新 PATH
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Write-OK "Node.js 安装完成 (winget)"
+            Write-OK "Node.js installed (winget)"
             return
         }
     }
 
-    # fallback: 直接下载
     $installer = "$env:TEMP\NodeJS-Installer.msi"
-    Write-OK "下载 Node.js LTS..."
+    Write-OK "Downloading Node.js LTS..."
     Invoke-WebRequest -Uri $NODE_URL -OutFile $installer
     Start-Process -FilePath "msiexec.exe" -ArgumentList "/i","`"$installer`"","/qn","/norestart" -Wait
     Remove-Item $installer -Force
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-    Write-OK "Node.js 安装完成 (direct download)"
+    Write-OK "Node.js installed (direct download)"
 }
 
 function Install-ClaudeCode {
     if ($Global:Config.SkipClaude) {
-        Write-Step "已选择跳过 Claude Code 安装"
+        Write-Step "Claude Code install skipped by user"
         return
     }
-    Write-Step "安装 Claude Code v$($Global:Config.ClaudeVersion)..."
+    Write-Step "Installing Claude Code v$($Global:Config.ClaudeVersion)..."
 
-    # 确保 npm 可用
     if (-not (Test-Command npm.exe)) {
-        Write-Err "npm 不可用，无法安装 Claude Code"
+        Write-Err "npm not available, cannot install Claude Code"
         return
     }
 
-    # 配置 npm prefix
     $npmPrefix = "$env:USERPROFILE\.npm-global"
     if (-not (Test-Path $npmPrefix)) { New-Item -ItemType Directory -Path $npmPrefix -Force | Out-Null }
     npm config set prefix $npmPrefix
 
-    # 如果配置了代理，设置 npm 代理
     if ($Global:Config.ProxyUrl) {
         npm config set proxy $Global:Config.ProxyUrl
         npm config set https-proxy $Global:Config.ProxyUrl
     }
 
-    # 安装指定版本
     $package = "@anthropic-ai/claude-code@$($Global:Config.ClaudeVersion)"
     npm install -g $package
     if ($LASTEXITCODE -eq 0) {
-        Write-OK "Claude Code v$($Global:Config.ClaudeVersion) 安装完成"
-        Write-OK "路径: $npmPrefix\node_modules\@anthropic-ai\claude-code"
+        Write-OK "Claude Code v$($Global:Config.ClaudeVersion) installed"
+        Write-OK "Path: $npmPrefix\node_modules\@anthropic-ai\claude-code"
     } else {
-        Write-Err "Claude Code 安装失败 (exit code: $LASTEXITCODE)"
+        Write-Err "Claude Code install failed (exit code: $LASTEXITCODE)"
     }
 }
 
 # ============================================================
-#  环境配置 — 写入 Git Bash 的 .bashrc
+#  Environment Config — write to Git Bash .bashrc
 # ============================================================
 function Initialize-Bashrc {
-    param([string]$Marker = "# >>> dev-setup auto config >>>")
-
     $bashrc = $Global:Config.BashrcPath
     if (-not (Test-Path $bashrc)) { New-Item -ItemType File -Path $bashrc -Force | Out-Null }
 
     $content = Get-Content $bashrc -Raw -ErrorAction SilentlyContinue
     if (-not $content) { $content = "" }
 
-    # 移除旧配置段
-    $endMarker = "# <<< dev-setup auto config <<<"
-    if ($content -match [regex]::Escape($Marker)) {
-        $content = $content -replace "(?s)$Marker.*$endMarker", ""
+    # Remove old config block
+    if ($content -match [regex]::Escape($MARKER)) {
+        $content = $content -replace "(?s)$MARKER.*$ENDMARKER", ""
     }
 
-    # 构建新配置
+    # Build new config block
     $lines = @()
     $lines += ""
-    $lines += $Marker
-    $lines += "# 此段由 dev-setup 自动生成 — $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    $lines += $MARKER
+    $lines += "# Auto-generated by dev-setup on $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     $lines += ""
 
     # npm global path
-    $lines += "# npm global bin"
     $lines += 'export PATH="$HOME/.npm-global:$HOME/.npm-global/bin:$PATH"'
     $lines += ""
 
-    # conda init (如果 conda 已安装)
-    if ($Global:Config.HasConda -or (Test-Path "$env:USERPROFILE\Miniconda3\Scripts\conda.exe")) {
-        $condaPath = if ($Global:Config.HasConda) {
-            (Split-Path -Parent (Split-Path -Parent (Get-Command conda.exe).Source))
-        } else {
-            "$env:USERPROFILE\Miniconda3"
+    # Conda
+    $condaPaths = @("$env:USERPROFILE\Miniconda3", "$env:USERPROFILE\anaconda3")
+    foreach ($cp in $condaPaths) {
+        if (Test-Path "$cp\Scripts\conda.exe") {
+            $unixPath = $cp -replace '\\', '/' -replace '^C:', '/c'
+            $lines += "# Conda"
+            $lines += "export CONDA_ROOT=`"$unixPath`""
+            $lines += 'export PATH="$CONDA_ROOT:$CONDA_ROOT/Scripts:$CONDA_ROOT/Library/bin:$PATH"'
+            $lines += ""
+            break
         }
-        $condaPathUnix = $condaPath -replace '\\', '/' -replace '^C:', '/c'
-        $lines += "# conda"
-        $lines += "export CONDA_ROOT=`"$condaPathUnix`""
-        $lines += 'export PATH="$CONDA_ROOT:$CONDA_ROOT/Scripts:$CONDA_ROOT/Library/bin:$PATH"'
-        $lines += ""
     }
 
-    # Node.js path
-    if ($Global:Config.HasNode) {
-        $nodeDir = Split-Path -Parent (Get-Command node.exe).Source
-        $nodeDirUnix = $nodeDir -replace '\\', '/' -replace '^C:', '/c'
+    # Node.js
+    $nodePath = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+    if ($nodePath) {
+        $nodeDir = (Split-Path -Parent $nodePath) -replace '\\', '/' -replace '^C:', '/c'
         $lines += "# Node.js"
-        $lines += "export NODE_HOME=`"$nodeDirUnix`""
+        $lines += "export NODE_HOME=`"$nodeDir`""
         $lines += 'export PATH="$NODE_HOME:$PATH"'
         $lines += ""
     }
 
-    # 代理
+    # Proxy
     if ($Global:Config.ProxyUrl) {
-        $lines += "# 代理设置"
+        $lines += "# Proxy / VPN"
         $lines += "export HTTP_PROXY=`"$($Global:Config.ProxyUrl)`""
         $lines += "export HTTPS_PROXY=`"$($Global:Config.ProxyUrl)`""
         $lines += "export http_proxy=`"$($Global:Config.ProxyUrl)`""
         $lines += "export https_proxy=`"$($Global:Config.ProxyUrl)`""
-        $lines += "export NO_PROXY=`"localhost,127.0.0.1,.local`""
+        $lines += 'export NO_PROXY="localhost,127.0.0.1,.local"'
         $lines += ""
     }
 
-    # Claude Code / AI 后端
+    # AI Backend (Claude Code)
     if ($Global:Config.ApiBaseUrl) {
-        $lines += "# AI 后端 (Claude Code 兼容)"
+        $lines += "# AI Backend (Claude Code)"
         $lines += "export ANTHROPIC_BASE_URL=`"$($Global:Config.ApiBaseUrl)`""
         $lines += "export ANTHROPIC_API_KEY=`"$($Global:Config.ApiKey)`""
         if ($Global:Config.ApiModel) {
@@ -342,23 +321,20 @@ function Initialize-Bashrc {
     }
 
     # Claude Code alias
-    if (-not $Global:Config.SkipClaude) {
-        $lines += "# Claude Code"
-        $lines += "alias claude=`"claude.cmd`""
-        $lines += ""
-    }
+    $lines += "alias claude=`"claude.cmd`""
+    $lines += ""
 
-    $lines += $endMarker
+    $lines += $ENDMARKER
     $lines += ""
 
     $newBlock = $lines -join "`r`n"
     Set-Content -Path $bashrc -Value ($content.TrimEnd() + "`r`n" + $newBlock) -Encoding UTF8
 
-    Write-OK ".bashrc 已更新: $bashrc"
+    Write-OK ".bashrc updated: $bashrc"
 }
 
 function Initialize-GitConfig {
-    Write-Step "配置 Git 全局设置..."
+    Write-Step "Configuring Git global settings..."
 
     if ($Global:Config.GitUser) {
         git config --global user.name $Global:Config.GitUser
@@ -368,31 +344,28 @@ function Initialize-GitConfig {
         git config --global user.email $Global:Config.GitEmail
         Write-OK "git user.email = $($Global:Config.GitEmail)"
     }
-
     if ($Global:Config.ProxyUrl) {
         git config --global http.proxy $Global:Config.ProxyUrl
         git config --global https.proxy $Global:Config.ProxyUrl
-        Write-OK "git 代理已配置: $($Global:Config.ProxyUrl)"
+        Write-OK "git proxy set: $($Global:Config.ProxyUrl)"
     }
-
-    # 设置默认分支名
     git config --global init.defaultBranch main
-    Write-OK "git 默认分支: main"
+    Write-OK "git default branch: main"
 }
 
 function Initialize-CondaConfig {
     if (-not (Test-Command conda.exe)) { return }
-    Write-Step "配置 Conda..."
+    Write-Step "Configuring Conda..."
 
     if ($Global:Config.ProxyUrl) {
         conda config --set proxy_servers.http $Global:Config.ProxyUrl
         conda config --set proxy_servers.https $Global:Config.ProxyUrl
-        Write-OK "conda 代理已配置"
+        Write-OK "conda proxy set"
     }
 }
 
 # ============================================================
-#  保存配置文件
+#  Save Config File
 # ============================================================
 function Save-ConfigFile {
     $configDir = Join-Path $ScriptDir "config"
@@ -407,22 +380,27 @@ function Save-ConfigFile {
         apiBaseUrl    = $Global:Config.ApiBaseUrl
         apiModel      = $Global:Config.ApiModel
         claudeVersion = $Global:Config.ClaudeVersion
-        # 不保存 API Key 到配置文件
+        components    = @{
+            git        = $Global:Config.HasGit
+            conda      = (Test-Command conda.exe)
+            node       = (Test-Command node.exe)
+            claudeCode = (Test-Command claude.exe)
+        }
     }
     $safeConfig | ConvertTo-Json -Depth 3 | Set-Content -Path $configPath -Encoding UTF8
-    Write-OK "配置已保存: $configPath"
+    Write-OK "Config saved: $configPath"
 }
 
 # ============================================================
-#  Web 仪表盘
+#  Web Dashboard
 # ============================================================
 function Start-Dashboard {
-    Write-Step "启动 Web 仪表盘..."
+    Write-Step "Starting Web Dashboard..."
 
     $frontendDir = Join-Path $ScriptDir "frontend"
     $serverScript = Join-Path $ScriptDir "scripts\server.py"
 
-    # 写一个简单的 Python 服务器脚本
+    # Generate Python server script
     $pyScript = @'
 import http.server
 import json
@@ -467,7 +445,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def log_message(self, format, *args):
-        pass  # 安静模式
+        pass
 
 if __name__ == "__main__":
     os.chdir(FRONTEND_DIR)
@@ -485,7 +463,7 @@ if __name__ == "__main__":
     if (-not (Test-Path $scriptsDir)) { New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null }
     Set-Content -Path $serverScript -Value $pyScript -Encoding UTF8
 
-    # 用 Python 启动服务器
+    # Find Python
     $pythonCmd = $null
     if (Test-Command python.exe) {
         $pythonCmd = (Get-Command python.exe).Source
@@ -496,14 +474,13 @@ if __name__ == "__main__":
     }
 
     if (-not $pythonCmd) {
-        Write-Warn "未找到 Python，跳过仪表盘启动"
+        Write-Warn "Python not found, skipping dashboard"
         return
     }
 
-    # 后台启动服务器
     $proc = Start-Process -FilePath $pythonCmd -ArgumentList $serverScript -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\dashboard_stdout.txt"
 
-    # 等待服务器就绪
+    # Wait for server ready
     $ready = $false
     for ($i = 0; $i -lt 10; $i++) {
         Start-Sleep -Seconds 1
@@ -519,77 +496,66 @@ if __name__ == "__main__":
 
     if ($ready) {
         $url = "http://127.0.0.1:$port"
-        Write-OK "仪表盘已启动: $url"
-        Start-Process $url  # 自动打开浏览器
+        Write-OK "Dashboard ready: $url"
+        Start-Process $url
     } else {
-        Write-Warn "仪表盘启动超时，请手动运行: python `"$serverScript`""
+        Write-Warn "Dashboard start timeout. Run manually: python `"$serverScript`""
     }
 }
 
 # ============================================================
-#  安装报告
+#  Install Report
 # ============================================================
 function Write-InstallReport {
     Write-Host "`n" -NoNewline
-    Write-Host "  ╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "  ║     安装完成!                                            ║" -ForegroundColor Green
-    Write-Host "  ╚══════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "  ============================================================" -ForegroundColor Green
+    Write-Host "    Installation Complete!" -ForegroundColor Green
+    Write-Host "  ============================================================" -ForegroundColor Green
     Write-Host ""
 
-    Write-Host "  已安装组件:" -ForegroundColor Yellow
-    Write-Host "    Git Bash:    $(if ($Global:Config.GitBashPath) { '已配置' } else { '未安装' })"
-    Write-Host "    Miniconda:   $(if (Test-Command conda.exe) { '已配置' } else { '未安装' })"
-    Write-Host "    Node.js:     $(if (Test-Command node.exe) { (node --version 2>&1).Trim() } else { '未安装' })"
-    Write-Host "    npm:         $(if (Test-Command npm.exe) { (npm --version 2>&1).Trim() } else { '未安装' })"
-    Write-Host "    Claude Code: $(if (Test-Command claude.exe) { (claude --version 2>&1).Trim() } else { '未安装' })"
+    Write-Host "  Installed components:" -ForegroundColor Yellow
+    Write-Host "    Git Bash:    $(if ($Global:Config.GitBashPath) { 'ready' } else { 'not installed' })"
+    Write-Host "    Miniconda:   $(if (Test-Command conda.exe) { 'ready' } else { 'not installed' })"
+    Write-Host "    Node.js:     $(if (Test-Command node.exe) { (node --version 2>&1).Trim() } else { 'not installed' })"
+    Write-Host "    npm:         $(if (Test-Command npm.exe) { (npm --version 2>&1).Trim() } else { 'not installed' })"
+    Write-Host "    Claude Code: $(if (Test-Command claude.exe) { (claude --version 2>&1).Trim() } else { 'not installed' })"
 
     Write-Host ""
-    Write-Host "  配置文件:" -ForegroundColor Yellow
+    Write-Host "  Configuration files:" -ForegroundColor Yellow
     Write-Host "    .bashrc:     $($Global:Config.BashrcPath)"
-    Write-Host "    安装配置:    $(Join-Path $ScriptDir 'config\config.local.json')"
+    Write-Host "    Setup cfg:   $(Join-Path $ScriptDir 'config\config.local.json')"
 
     Write-Host ""
-    Write-Host "  打开 Git Bash 即可使用以下命令:" -ForegroundColor Yellow
-    Write-Host "    claude      启动 Claude Code"
-    Write-Host "    conda       管理 Python 环境"
-    Write-Host "    git         版本控制"
+    Write-Host "  Open Git Bash and run:" -ForegroundColor Yellow
+    Write-Host "    claude      Launch Claude Code"
+    Write-Host "    conda       Manage Python environments"
+    Write-Host "    git         Version control"
 }
 
 # ============================================================
-#  主流程
+#  Main
 # ============================================================
 function Main {
-    Write-Host "`n  开发环境一键安装工具" -ForegroundColor Magenta
-    Write-Host "  目标: Git Bash + Miniconda + Node.js + Claude Code" -ForegroundColor Gray
+    Write-Host "`n  Dev Environment One-Click Setup" -ForegroundColor Magenta
+    Write-Host "  Target: Git Bash + Miniconda + Node.js + Claude Code" -ForegroundColor Gray
     Write-Host ""
 
     try {
-        # 1. 检测环境
         Detect-Environment
-
-        # 2. 收集配置
         Invoke-ConfigWizard
-
-        # 3. 安装
         Install-GitForWindows
         Install-Miniconda
         Install-NodeJS
         Install-ClaudeCode
-
-        # 4. 配置
         Initialize-GitConfig
         Initialize-CondaConfig
         Initialize-Bashrc
         Save-ConfigFile
-
-        # 5. 启动仪表盘
         Start-Dashboard
-
-        # 6. 报告
         Write-InstallReport
     }
     catch {
-        Write-Err "安装过程中出现错误: $_"
+        Write-Err "Install error: $_"
         Write-Host $_.ScriptStackTrace
         pause
         exit 1
@@ -597,3 +563,4 @@ function Main {
 }
 
 Main
+

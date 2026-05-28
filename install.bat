@@ -1,29 +1,28 @@
 @echo off
-chcp 65001 >nul
-title 开发环境一键安装 - Dev Environment Setup
+setlocal enabledelayedexpansion
 
 :: ============================================================
-::  开发环境一键安装工具
-::  安装: Git Bash + Miniconda + Node.js + Claude Code + Web 仪表盘
+::  Dev Environment One-Click Setup
+::  Git Bash + Miniconda + Node.js + Claude Code + Web Dashboard
 :: ============================================================
 
 echo.
-echo  ╔══════════════════════════════════════════════════════════╗
-echo  ║     开发环境一键安装工具 v1.0                            ║
-echo  ║     Git Bash ^| Miniconda ^| Node.js ^| Claude Code       ║
-echo  ╚══════════════════════════════════════════════════════════╝
+echo   ============================================================
+echo     Dev Environment Setup v1.0.1
+echo     Git Bash ^| Miniconda ^| Node.js ^| Claude Code
+echo   ============================================================
 echo.
 
-:: 检查管理员权限
+:: Check admin privileges
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [提示] 需要管理员权限来安装软件
-    echo 正在请求管理员权限...
+    echo [INFO] Admin privileges required
+    echo [INFO] Requesting admin elevation...
     powershell -Command "Start-Process '%~f0' -Verb RunAs -WorkingDirectory '%~dp0'"
     exit /b
 )
 
-:: 已获取管理员权限，启动 PowerShell 安装脚本
-echo [启动] 正在启动安装程序...
+:: Launch PowerShell installer
+echo [INFO] Starting installer...
 powershell -ExecutionPolicy Bypass -NoProfile -File "%~dp0setup.ps1"
 pause
