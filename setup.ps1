@@ -432,6 +432,42 @@ function Install-Miniconda {
     Write-OK "Miniconda installed: $installPath"
 }
 
+function Find-npmPath {
+    # Actively search for npm.cmd in common Node.js install locations
+    $candidates = @(
+        "$env:ProgramFiles\nodejs\npm.cmd",
+        "${env:ProgramFiles(x86)}\nodejs\npm.cmd",
+        "$env:LOCALAPPDATA\Programs\nodejs\npm.cmd",
+        "$env:APPDATA\npm\npm.cmd"
+    )
+    foreach ($p in $candidates) {
+        if (Test-Path $p) { return $p }
+    }
+    # Fallback: check PATH
+    $fromPath = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
+    if ($fromPath) { return $fromPath }
+    return $null
+}
+
+function Find-PythonPath {
+    $candidates = @(
+        "$env:USERPROFILE\anaconda3\python.exe",
+        "$env:USERPROFILE\Miniconda3\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+        "$env:ProgramFiles\Python313\python.exe",
+        "$env:ProgramFiles\Python312\python.exe",
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps\python.exe"
+    )
+    foreach ($p in $candidates) {
+        if (Test-Path $p) { return $p }
+    }
+    $fromPath = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+    if ($fromPath) { return $fromPath }
+    return $null
+}
+
 function Install-NodeJS {
     if ($Global:Detected.HasNode -and $Global:Detected.HasNpm) {
         Write-Step "Node.js already installed, skipping"
@@ -439,22 +475,40 @@ function Install-NodeJS {
     }
     Write-Step "Installing Node.js..."
 
+    # Try winget first
+    $wingetOk = $false
     if ($Global:Detected.HasWinget) {
         winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-source-agreements --accept-package-agreements
-        if ($LASTEXITCODE -eq 0) {
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Write-OK "Node.js installed (winget)"
-            return
-        }
+        if ($LASTEXITCODE -eq 0) { $wingetOk = $true }
     }
 
-    $installer = "$env:TEMP\NodeJS-Installer.msi"
-    Write-OK "Downloading Node.js LTS..."
-    Invoke-WebRequest -Uri $NODE_URL -OutFile $installer -UseBasicParsing
-    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i","`"$installer`"","/qn","/norestart" -Wait
-    Remove-Item $installer -Force
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-    Write-OK "Node.js installed (direct download)"
+    if (-not $wingetOk) {
+        $installer = "$env:TEMP\NodeJS-Installer.msi"
+        Write-OK "Downloading Node.js LTS..."
+        Invoke-WebRequest -Uri $NODE_URL -OutFile $installer -UseBasicParsing
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i","`"$installer`"","/qn","/norestart" -Wait
+        Remove-Item $installer -Force
+    }
+
+    # Force-refresh PATH from registry (with delay for winget to finish writing)
+    Start-Sleep -Seconds 2
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path","Machine")
+    $userPath    = [System.Environment]::GetEnvironmentVariable("Path","User")
+    $env:Path = "$machinePath;$userPath;$env:Path"
+
+    # Actively find npm
+    $npmFound = Find-npmPath
+    if ($npmFound) {
+        # Prepend its directory to PATH so it takes priority
+        $npmDir = Split-Path -Parent $npmFound
+        $env:Path = "$npmDir;$env:Path"
+        $Global:Detected.HasNpm = $true
+        $Global:Detected.NpmPath = $npmFound
+        Write-OK "Node.js installed, npm found at: $npmFound"
+    } else {
+        Write-OK "Node.js installed, but npm not found on PATH yet"
+        Write-Warn "You may need to restart your terminal, then re-run this installer"
+    }
 }
 
 function Install-ClaudeCode {
@@ -468,25 +522,31 @@ function Install-ClaudeCode {
     }
     Write-Step "Installing Claude Code v$($Global:Settings.ClaudeVersion)..."
 
-    if (-not (Test-Command npm.exe)) {
-        Write-Err "npm not available, cannot install Claude Code"
+    # Resolve npm path: use found path from Node.js install, or search again
+    $npmExe = $Global:Detected.NpmPath
+    if (-not $npmExe) { $npmExe = Find-npmPath }
+    if (-not $npmExe) {
+        Write-Err "npm not found. Please install Node.js first, then re-run this installer."
+        Write-Err "If Node.js was just installed, restart your terminal and try again."
         return
     }
+    Write-OK "Using npm: $npmExe"
 
     $npmPrefix = "$env:USERPROFILE\.npm-global"
     if (-not (Test-Path $npmPrefix)) { New-Item -ItemType Directory -Path $npmPrefix -Force | Out-Null }
-    npm config set prefix $npmPrefix
+    & $npmExe config set prefix $npmPrefix
 
     if ($Global:Settings.Proxy) {
         $proxyUrl = "http://$($Global:Settings.Proxy)"
-        npm config set proxy $proxyUrl
-        npm config set https-proxy $proxyUrl
+        & $npmExe config set proxy $proxyUrl
+        & $npmExe config set https-proxy $proxyUrl
     }
 
     $package = "@anthropic-ai/claude-code@$($Global:Settings.ClaudeVersion)"
-    npm install -g $package
+    & $npmExe install -g $package
     if ($LASTEXITCODE -eq 0) {
         Write-OK "Claude Code v$($Global:Settings.ClaudeVersion) installed"
+        $Global:Detected.HasClaude = $true
     } else {
         Write-Err "Claude Code install failed (exit code: $LASTEXITCODE)"
     }
@@ -655,16 +715,13 @@ if __name__ == "__main__":
     $pyScript = $pyScript -replace '{CONFIG_DIR}', ((Join-Path $ScriptDir "config") -replace '\\', '\\')
     Set-Content -Path $serverScript -Value $pyScript -Encoding UTF8
 
-    # Find Python
-    $pythonCmd = $null
-    if (Test-Command python.exe) { $pythonCmd = (Get-Command python.exe).Source }
-    elseif (Test-Path "$env:USERPROFILE\Miniconda3\python.exe") { $pythonCmd = "$env:USERPROFILE\Miniconda3\python.exe" }
-    elseif (Test-Path "$env:USERPROFILE\anaconda3\python.exe") { $pythonCmd = "$env:USERPROFILE\anaconda3\python.exe" }
-
+    # Find Python (search known locations, not just PATH)
+    $pythonCmd = Find-PythonPath
     if (-not $pythonCmd) {
         Write-Warn "Python not found, skipping dashboard"
         return
     }
+    Write-OK "Using Python: $pythonCmd"
 
     Start-Process -FilePath $pythonCmd -ArgumentList $serverScript -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\dashboard_stdout.txt"
 
@@ -749,4 +806,5 @@ function Main {
 }
 
 Main
+
 
