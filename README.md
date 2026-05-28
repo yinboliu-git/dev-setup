@@ -1,6 +1,6 @@
 # 开发环境一键安装工具
 
-Windows 一键安装脚本，快速搭建 AI 开发环境。
+Windows 一键安装Claude Code和deepseek后端脚本，快速搭建 AI 开发环境。
 
 ## 安装内容
 
