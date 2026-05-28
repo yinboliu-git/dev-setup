@@ -1,0 +1,21 @@
+{
+    "installedAt": "",
+    "gitUser": "",
+    "gitEmail": "",
+    "proxyUrl": "",
+    "apiBaseUrl": "",
+    "apiModel": "",
+    "claudeVersion": "2.1.150",
+    "components": {
+        "git": false,
+        "conda": false,
+        "node": false,
+        "claudeCode": false
+    },
+    "paths": {
+        "gitBash": "C:\\Program Files\\Git\\bin\\bash.exe",
+        "condaRoot": "%USERPROFILE%\\Miniconda3",
+        "npmPrefix": "%USERPROFILE%\\.npm-global",
+        "claudeBin": "%USERPROFILE%\\.npm-global\\claude.cmd"
+    }
+}

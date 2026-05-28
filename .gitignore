@@ -1,0 +1,33 @@
+# Installer downloads
+downloads/
+*.exe
+*.msi
+
+# Conda
+Miniconda3*/
+anaconda3*/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude local config
+.claude/
+
+# Config with secrets
+config/config.local.json
+
+# Logs
+*.log
+logs/
